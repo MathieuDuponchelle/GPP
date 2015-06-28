@@ -68,6 +68,7 @@ int main (void)
             //  first:
             if (zmsg_size (msg) == 3) {
                 cycles++;
+                /*
                 if (cycles > 3 && randof (5) == 0) {
                     printf ("I: simulating a crash\n");
                     zmsg_destroy (&msg);
@@ -80,6 +81,7 @@ int main (void)
                     if (zctx_interrupted)
                         break;
                 }
+                */
                 printf ("I: normal reply\n");
                 zmsg_send (&msg, worker);
                 liveness = HEARTBEAT_LIVENESS;
