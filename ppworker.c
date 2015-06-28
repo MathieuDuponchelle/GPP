@@ -94,9 +94,10 @@ int main (void)
             //  indicator:
             if (zmsg_size (msg) == 1) {
                 zframe_t *frame = zmsg_first (msg);
-                if (memcmp (zframe_data (frame), PPP_HEARTBEAT, 1) == 0)
+                if (memcmp (zframe_data (frame), PPP_HEARTBEAT, 1) == 0) {
                     liveness = HEARTBEAT_LIVENESS;
-                else {
+                    printf ("got heartbeat from queue !\n");
+                } else {
                     printf ("E: invalid message\n");
                     zmsg_dump (msg);
                 }

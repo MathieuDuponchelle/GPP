@@ -1,5 +1,8 @@
 //  Paranoid Pirate queue
 
+#include <glib.h>
+#include <glib-unix.h>
+#include <gio/gio.h>
 #include "czmq.h"
 #define HEARTBEAT_LIVENESS  3       //  3-5 is reasonable
 #define HEARTBEAT_INTERVAL  1000    //  msecs
@@ -98,88 +101,166 @@ s_workers_purge (zlist_t *workers)
 //  The main task is a load-balancer with heartbeating on workers so we
 //  can detect crashed or blocked worker tasks:
 
+typedef struct {
+  void *frontend;
+  void *backend;
+  zlist_t *workers;
+  GMainLoop *loop;
+  GIOChannel *frontend_channel;
+  guint frontend_source;
+  uint64_t heartbeat_at;
+} ppqueue_t;
+
+static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueue_t *self);
+
+int s_handle_backend (ppqueue_t *self)
+{
+  zmsg_t *msg = zmsg_recv (self->backend);
+  if (!msg) {
+    return -1;
+  }
+
+  //  Any sign of life from worker means it's ready
+  zframe_t *identity = zmsg_unwrap (msg);
+  worker_t *worker = s_worker_new (identity);
+  s_worker_ready (worker, self->workers);
+
+  if (zlist_size (self->workers) == 1 && !self->frontend_source) {
+    self->frontend_source = g_io_add_watch(self->frontend_channel,
+        G_IO_IN, (GIOFunc) callback_func, self);
+  }
+
+  //  Validate control message, or return reply to client
+  if (zmsg_size (msg) == 1) {
+    zframe_t *frame = zmsg_first (msg);
+    if (memcmp (zframe_data (frame), PPP_READY, 1)
+        &&  memcmp (zframe_data (frame), PPP_HEARTBEAT, 1)) {
+      printf ("E: invalid message from worker");
+      zmsg_dump (msg);
+    }
+    zmsg_destroy (&msg);
+  }
+  else {
+    zmsg_send (&msg, self->frontend);
+  }
+  return 0;
+}
+
+int s_handle_frontend (ppqueue_t *self)
+{
+  zmsg_t *msg = zmsg_recv (self->frontend);
+  if (!msg) {
+    return -1;
+  }
+  zframe_t *identity = s_workers_next (self->workers); 
+  if (zlist_size (self->workers) == 0) {
+    g_source_remove (self->frontend_source);
+    self->frontend_source = 0;
+  }
+  zmsg_prepend (msg, &identity);
+  zmsg_send (&msg, self->backend);
+  return 0;
+}
+
+static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueue_t *self)
+{
+  uint32_t status;
+  size_t sizeof_status = sizeof(status);
+  gboolean go_on;
+
+  do {
+    go_on = FALSE;
+
+    if (zmq_getsockopt(self->backend, ZMQ_EVENTS, &status, &sizeof_status)) {
+      perror("retrieving event status");
+      return 0;
+    }
+
+    if ((status & ZMQ_POLLIN) != 0) {
+      s_handle_backend (self);
+      go_on = TRUE;
+    }
+
+    if (!self->frontend_source)
+      continue;
+
+    if (zmq_getsockopt(self->frontend, ZMQ_EVENTS, &status, &sizeof_status)) {
+      perror("retrieving event status");
+      return 0;
+    }
+
+    if ((status & ZMQ_POLLIN) != 0) {
+      go_on = TRUE;
+      s_handle_frontend (self);
+    }
+  } while (go_on);
+
+  return 1; // keep the callback active
+}
+
+static gboolean
+do_heartbeat (ppqueue_t *self)
+{
+  worker_t *worker = (worker_t *) zlist_first (self->workers);
+
+  while (worker) {
+    zframe_send (&worker->identity, self->backend,
+        ZFRAME_REUSE + ZFRAME_MORE);
+    zframe_t *frame = zframe_new (PPP_HEARTBEAT, 1);
+    zframe_send (&frame, self->backend, 0);
+    worker = (worker_t *) zlist_next (self->workers);
+  }
+
+  s_workers_purge (self->workers);
+  return TRUE;
+}
+
+static gboolean
+interrupted_cb (ppqueue_t *self)
+{
+  g_main_loop_quit (self->loop);
+  return FALSE;
+}
+
 int main (void)
 {
-    zctx_t *ctx = zctx_new ();
-    void *frontend = zsocket_new (ctx, ZMQ_ROUTER);
-    void *backend = zsocket_new (ctx, ZMQ_ROUTER);
-    zsocket_bind (frontend, "tcp://*:5555");    //  For clients
-    zsocket_bind (backend,  "tcp://*:5556");    //  For workers
+  zctx_t *ctx = zctx_new ();
+  ppqueue_t *self = g_malloc0 (sizeof (ppqueue_t));
+  self->frontend = zsocket_new (ctx, ZMQ_ROUTER);
+  self->backend = zsocket_new (ctx, ZMQ_ROUTER);
+  zsocket_bind (self->frontend, "tcp://*:5555");    //  For clients
+  zsocket_bind (self->backend,  "tcp://*:5556");    //  For workers
+  self->loop = g_main_loop_new (NULL, FALSE);
 
-    //  List of available workers
-    zlist_t *workers = zlist_new ();
+  //  List of available workers
+  self->workers = zlist_new ();
 
-    //  Send out heartbeats at regular intervals
-    uint64_t heartbeat_at = zclock_time () + HEARTBEAT_INTERVAL;
+  {
+    int fd;
+    size_t sizeof_fd = sizeof(fd);
+    if(zmq_getsockopt(self->frontend, ZMQ_FD, &fd, &sizeof_fd))
+      perror("retrieving zmq fd");
+    self->frontend_channel = g_io_channel_unix_new(fd);
+  }
 
-    while (true) {
-        zmq_pollitem_t items [] = {
-            { backend,  0, ZMQ_POLLIN, 0 },
-            { frontend, 0, ZMQ_POLLIN, 0 }
-        };
-        //  Poll frontend only if we have available workers
-        int rc = zmq_poll (items, zlist_size (workers)? 2: 1,
-            HEARTBEAT_INTERVAL * ZMQ_POLL_MSEC);
-        if (rc == -1)
-            break;              //  Interrupted
+  {
+    int fd;
+    size_t sizeof_fd = sizeof(fd);
+    if(zmq_getsockopt(self->backend, ZMQ_FD, &fd, &sizeof_fd))
+      perror("retrieving zmq fd");
+    GIOChannel* channel = g_io_channel_unix_new(fd);
+    g_io_add_watch(channel, G_IO_IN, (GIOFunc) callback_func, self);
+  }
 
-        //  Handle worker activity on backend
-        if (items [0].revents & ZMQ_POLLIN) {
-            //  Use worker identity for load-balancing
-            zmsg_t *msg = zmsg_recv (backend);
-            if (!msg)
-                break;          //  Interrupted
-
-            //  Any sign of life from worker means it's ready
-            zframe_t *identity = zmsg_unwrap (msg);
-            worker_t *worker = s_worker_new (identity);
-            s_worker_ready (worker, workers);
-
-            //  Validate control message, or return reply to client
-            if (zmsg_size (msg) == 1) {
-                zframe_t *frame = zmsg_first (msg);
-                if (memcmp (zframe_data (frame), PPP_READY, 1)
-                &&  memcmp (zframe_data (frame), PPP_HEARTBEAT, 1)) {
-                    printf ("E: invalid message from worker");
-                    zmsg_dump (msg);
-                }
-                zmsg_destroy (&msg);
-            }
-            else
-                zmsg_send (&msg, frontend);
-        }
-        if (items [1].revents & ZMQ_POLLIN) {
-            //  Now get next client request, route to next worker
-            zmsg_t *msg = zmsg_recv (frontend);
-            if (!msg)
-                break;          //  Interrupted
-            zframe_t *identity = s_workers_next (workers); 
-            zmsg_prepend (msg, &identity);
-            zmsg_send (&msg, backend);
-        }
-        //  .split handle heartbeating
-        //  We handle heartbeating after any socket activity. First, we send
-        //  heartbeats to any idle workers if it's time. Then, we purge any
-        //  dead workers:
-        if (zclock_time () >= heartbeat_at) {
-            worker_t *worker = (worker_t *) zlist_first (workers);
-            while (worker) {
-                zframe_send (&worker->identity, backend,
-                             ZFRAME_REUSE + ZFRAME_MORE);
-                zframe_t *frame = zframe_new (PPP_HEARTBEAT, 1);
-                zframe_send (&frame, backend, 0);
-                worker = (worker_t *) zlist_next (workers);
-            }
-            heartbeat_at = zclock_time () + HEARTBEAT_INTERVAL;
-        }
-        s_workers_purge (workers);
-    }
-    //  When we're done, clean up properly
-    while (zlist_size (workers)) {
-        worker_t *worker = (worker_t *) zlist_pop (workers);
-        s_worker_destroy (&worker);
-    }
-    zlist_destroy (&workers);
-    zctx_destroy (&ctx);
-    return 0;
+  g_unix_signal_add_full (G_PRIORITY_DEFAULT, SIGINT, (GSourceFunc) interrupted_cb, self, NULL);
+  g_timeout_add (HEARTBEAT_INTERVAL, (GSourceFunc) do_heartbeat, self);
+  g_main_loop_run (self->loop);
+  //  When we're done, clean up properly
+  while (zlist_size (self->workers)) {
+    worker_t *worker = (worker_t *) zlist_pop (self->workers);
+    s_worker_destroy (&worker);
+  }
+  zlist_destroy (&self->workers);
+  zctx_destroy (&ctx);
+  return 0;
 }
