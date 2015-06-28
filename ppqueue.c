@@ -1,14 +1,30 @@
-//  Paranoid Pirate queue
-
 #include <glib.h>
 #include <glib-unix.h>
 #include <gio/gio.h>
 #include "czmq.h"
+
 #define HEARTBEAT_LIVENESS  3
 #define HEARTBEAT_INTERVAL  1000
 
 #define PPP_READY       "\001"
 #define PPP_HEARTBEAT   "\002"
+
+typedef struct {
+  zctx_t *ctx;
+  void *frontend;
+  void *backend;
+
+  GMainLoop *loop;
+  GIOChannel *frontend_channel;
+  guint frontend_source;
+  uint64_t heartbeat_at;
+  GHashTable *workerz;
+  GQueue *available_workerz;
+} ppqueue_t;
+
+static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueue_t *self);
+
+/* Worker management */
 
 typedef struct {
     zframe_t *identity;
@@ -35,17 +51,6 @@ worker_destroy (Worker *self)
   g_slice_free (Worker, self);
 }
 
-typedef struct {
-  void *frontend;
-  void *backend;
-  GMainLoop *loop;
-  GIOChannel *frontend_channel;
-  guint frontend_source;
-  uint64_t heartbeat_at;
-  GHashTable *workerz;
-  GQueue *available_workerz;
-} ppqueue_t;
-
 static gboolean
 maybe_purge_worker (gchar *id_string, Worker *worker, ppqueue_t *self)
 {
@@ -66,8 +71,6 @@ purge_workers (ppqueue_t *self)
   }
 }
 
-static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueue_t *self);
-
 static void
 add_available_worker (ppqueue_t *self, Worker *worker)
 {
@@ -86,6 +89,7 @@ add_new_worker (ppqueue_t *self, zframe_t *identity)
   return worker;
 }
 
+/* Messaging */
 
 int s_handle_backend (ppqueue_t *self)
 {
@@ -181,6 +185,8 @@ static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueu
   return 1; // keep the callback active
 }
 
+/* Heartbeating */
+
 static void
 send_heartbeat (gchar *id_string, Worker *worker, ppqueue_t *self)
 {
@@ -199,6 +205,34 @@ do_heartbeat (ppqueue_t *self)
   return TRUE;
 }
 
+/* Initialization */
+
+static GIOChannel *
+g_io_channel_from_zmq_socket (void *socket)
+{
+  int fd;
+  size_t sizeof_fd = sizeof(fd);
+  if(zmq_getsockopt(socket, ZMQ_FD, &fd, &sizeof_fd))
+    perror("retrieving zmq fd");
+  return g_io_channel_unix_new(fd);
+}
+
+static void
+create_channels (ppqueue_t *self)
+{
+  self->ctx = zctx_new ();
+  self->frontend = zsocket_new (self->ctx, ZMQ_ROUTER);
+  self->backend = zsocket_new (self->ctx, ZMQ_ROUTER);
+  zsocket_bind (self->frontend, "tcp://*:5555");
+  zsocket_bind (self->backend,  "tcp://*:5556");
+
+  self->frontend_channel = g_io_channel_from_zmq_socket (self->frontend);
+  g_io_add_watch (g_io_channel_from_zmq_socket (self->backend),
+      G_IO_IN, (GIOFunc) callback_func, self);
+}
+
+/* Main */
+
 static gboolean
 interrupted_cb (ppqueue_t *self)
 {
@@ -208,39 +242,19 @@ interrupted_cb (ppqueue_t *self)
 
 int main (void)
 {
-  zctx_t *ctx = zctx_new ();
   ppqueue_t *self = g_malloc0 (sizeof (ppqueue_t));
-  self->frontend = zsocket_new (ctx, ZMQ_ROUTER);
-  self->backend = zsocket_new (ctx, ZMQ_ROUTER);
-  zsocket_bind (self->frontend, "tcp://*:5555");    //  For clients
-  zsocket_bind (self->backend,  "tcp://*:5556");    //  For workers
+
+  create_channels (self);
   self->loop = g_main_loop_new (NULL, FALSE);
   self->workerz = g_hash_table_new_full (g_str_hash, g_str_equal,
       NULL, (GDestroyNotify) worker_destroy);
   self->available_workerz = g_queue_new();
-
-  {
-    int fd;
-    size_t sizeof_fd = sizeof(fd);
-    if(zmq_getsockopt(self->frontend, ZMQ_FD, &fd, &sizeof_fd))
-      perror("retrieving zmq fd");
-    self->frontend_channel = g_io_channel_unix_new(fd);
-  }
-
-  {
-    int fd;
-    size_t sizeof_fd = sizeof(fd);
-    if(zmq_getsockopt(self->backend, ZMQ_FD, &fd, &sizeof_fd))
-      perror("retrieving zmq fd");
-    GIOChannel* channel = g_io_channel_unix_new(fd);
-    g_io_add_watch(channel, G_IO_IN, (GIOFunc) callback_func, self);
-  }
 
   g_unix_signal_add_full (G_PRIORITY_DEFAULT, SIGINT, (GSourceFunc) interrupted_cb, self, NULL);
   g_timeout_add (HEARTBEAT_INTERVAL, (GSourceFunc) do_heartbeat, self);
   g_main_loop_run (self->loop);
 
   g_hash_table_unref (self->workerz);
-  zctx_destroy (&ctx);
+  zctx_destroy (&self->ctx);
   return 0;
 }
