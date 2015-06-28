@@ -4,22 +4,25 @@
 #include "czmq.h"
 
 #define HEARTBEAT_LIVENESS  3
-#define HEARTBEAT_INTERVAL  1000
+#define HEARTBEAT_INTERVAL  G_USEC_PER_SEC
 
 #define PPP_READY       "\001"
 #define PPP_HEARTBEAT   "\002"
 
 typedef struct {
+  /* Messaging */
   zctx_t *ctx;
   void *frontend;
   void *backend;
-
-  GMainLoop *loop;
   GIOChannel *frontend_channel;
   guint frontend_source;
-  uint64_t heartbeat_at;
+
+  /* Worker Management */
   GHashTable *workerz;
   GQueue *available_workerz;
+
+  /* Main */
+  GMainLoop *loop;
 } ppqueue_t;
 
 static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueue_t *self);
@@ -29,7 +32,7 @@ static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueu
 typedef struct {
     zframe_t *identity;
     gchar *id_string;
-    int64_t expiry;
+    gint64 expiry;
 } Worker;
 
 static Worker *
@@ -38,8 +41,6 @@ worker_new (zframe_t *identity)
     Worker *self = g_slice_new (Worker);
     self->identity = identity;
     self->id_string = zframe_strhex (identity);
-    self->expiry = zclock_time ()
-                 + HEARTBEAT_INTERVAL * HEARTBEAT_LIVENESS;
     return self;
 }
 
@@ -54,7 +55,8 @@ worker_destroy (Worker *self)
 static gboolean
 maybe_purge_worker (gchar *id_string, Worker *worker, ppqueue_t *self)
 {
-  if (zclock_time () > worker->expiry) {
+  if (g_get_monotonic_time () > worker->expiry) {
+    g_info ("purging worker with id %s\n", worker->id_string);
     g_queue_remove (self->available_workerz, worker);
     return TRUE;
   }
@@ -74,6 +76,7 @@ purge_workers (ppqueue_t *self)
 static void
 add_available_worker (ppqueue_t *self, Worker *worker)
 {
+  g_debug ("worker %s is now available", worker->id_string);
   g_queue_push_tail (self->available_workerz, worker);
   if (g_queue_get_length (self->available_workerz) == 1)
     self->frontend_source = g_io_add_watch(self->frontend_channel,
@@ -85,6 +88,7 @@ add_new_worker (ppqueue_t *self, zframe_t *identity)
 {
   Worker *worker = worker_new (identity);
   g_hash_table_insert (self->workerz, worker->id_string, worker);
+  g_info ("Created a new worker : %s", worker->id_string);
   add_available_worker (self, worker);
   return worker;
 }
@@ -118,11 +122,12 @@ int s_handle_backend (ppqueue_t *self)
     zmsg_destroy (&msg);
   }
   else {
+    g_info ("worker %s has completed a task !", worker->id_string);
     zmsg_send (&msg, self->frontend);
     add_available_worker (self, worker);
   }
 
-  worker->expiry = zclock_time ()
+  worker->expiry = g_get_monotonic_time ()
                  + HEARTBEAT_INTERVAL * HEARTBEAT_LIVENESS;
 
   return 0;
@@ -145,6 +150,8 @@ int s_handle_frontend (ppqueue_t *self)
 
   worker_id_dup = zframe_dup (worker->identity);
   zmsg_prepend (msg, &worker_id_dup);
+
+  g_info ("sending task to worker %s", worker->id_string);
   zmsg_send (&msg, self->backend);
   return 0;
 }
@@ -155,6 +162,7 @@ static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueu
   size_t sizeof_status = sizeof(status);
   gboolean go_on;
 
+  /* FIXME : error handling here, not sure what to do */
   do {
     go_on = FALSE;
 
@@ -182,7 +190,7 @@ static gboolean callback_func(GIOChannel *source, GIOCondition condition, ppqueu
     }
   } while (go_on);
 
-  return 1; // keep the callback active
+  return 1;
 }
 
 /* Heartbeating */
@@ -201,6 +209,7 @@ do_heartbeat (ppqueue_t *self)
 {
   g_hash_table_foreach (self->workerz, (GHFunc) send_heartbeat, self);
 
+  g_debug ("doing heartbeat\n");
   purge_workers (self);
   return TRUE;
 }
@@ -251,7 +260,7 @@ int main (void)
   self->available_workerz = g_queue_new();
 
   g_unix_signal_add_full (G_PRIORITY_DEFAULT, SIGINT, (GSourceFunc) interrupted_cb, self, NULL);
-  g_timeout_add (HEARTBEAT_INTERVAL, (GSourceFunc) do_heartbeat, self);
+  g_timeout_add (HEARTBEAT_INTERVAL / 1000, (GSourceFunc) do_heartbeat, self);
   g_main_loop_run (self->loop);
 
   g_hash_table_unref (self->workerz);
