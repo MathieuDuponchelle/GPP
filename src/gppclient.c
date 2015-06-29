@@ -14,6 +14,10 @@ struct _GPPClient
 
   void *backend;
   guint backend_source;
+
+  GPPClientTaskDoneHandler handler;
+  gpointer user_data;
+  const gchar *current_request;
 };
 
 G_DEFINE_TYPE (GPPClient, gpp_client, G_TYPE_OBJECT);
@@ -26,6 +30,8 @@ s_handle_backend (GPPClient *self)
     return;
 
   g_info ("Server replied %s\n", reply);
+  self->current_request = NULL;
+  self->handler (self, TRUE, self->user_data);
 
   free (reply);
 }
@@ -85,10 +91,22 @@ gpp_client_new (void)
 }
 
 gboolean
-gpp_client_send_request (GPPClient *self)
+gpp_client_send_request (GPPClient *self,
+                         const gchar *request,
+                         guint retries,
+                         GPPClientTaskDoneHandler handler,
+                         gpointer user_data)
 {
-  char request [10];
-  sprintf (request, "%d", 2);
+  if (!handler)
+    return FALSE;
+
+  if (self->current_request)
+    return FALSE;
+
+  self->handler = handler;
+  self->user_data = user_data;
+  self->current_request = request;
+
   zstr_send (self->backend, request);
   return TRUE;
 }

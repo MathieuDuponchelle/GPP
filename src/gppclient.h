@@ -9,9 +9,13 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE(GPPClient, gpp_client, GPP, CLIENT, GObject)
 
-typedef gboolean (*GPPClientTaskHandler)(GPPClient *, gpointer user_callback);
+typedef void (*GPPClientTaskDoneHandler)(GPPClient *, gboolean success, gpointer user_data);
 
 GPPClient * gpp_client_new (void);
-gboolean gpp_client_send_request (GPPClient *self);
+gboolean gpp_client_send_request (GPPClient *self,
+                                  const gchar *json_request,
+                                  guint retries,
+                                  GPPClientTaskDoneHandler handler,
+                                  gpointer user_data);
 
 #endif
