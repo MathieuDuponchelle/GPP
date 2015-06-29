@@ -58,14 +58,8 @@ int main (void)
             //  - 1-part HEARTBEAT -> heartbeat
             zmsg_t *msg = zmsg_recv (worker);
             if (!msg)
-                break;          //  Interrupted
+                break;
 
-            //  .split simulating problems
-            //  To test the robustness of the queue implementation we 
-            //  simulate various typical problems, such as the worker
-            //  crashing or running very slowly. We do this after a few
-            //  cycles so that the architecture can get up and running
-            //  first:
             if (zmsg_size (msg) == 3) {
                 cycles++;
                 /*
@@ -75,13 +69,13 @@ int main (void)
                     break;
                 }
                 else
+                */
                 if (cycles > 3 && randof (5) == 0) {
                     printf ("I: simulating CPU overload\n");
-                    sleep (3);
+                    sleep (2);
                     if (zctx_interrupted)
                         break;
                 }
-                */
                 printf ("I: normal reply\n");
                 zmsg_send (&msg, worker);
                 liveness = HEARTBEAT_LIVENESS;

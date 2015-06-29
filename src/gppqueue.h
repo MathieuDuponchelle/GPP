@@ -10,5 +10,6 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(GPPQueue, gpp_queue, GPP, QUEUE, GObject)
 
 GPPQueue * gpp_queue_new (void);
+gboolean gpp_queue_start (GPPQueue *self);
 
 #endif

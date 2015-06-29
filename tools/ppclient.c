@@ -21,6 +21,7 @@ int main (void)
         //  We send a request, then we work to get a reply
         char request [10];
         sprintf (request, "%d", ++sequence);
+        printf ("requesting  \n"); 
         zstr_send (client, request);
 
         int expect_reply = 1;

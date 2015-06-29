@@ -1,5 +1,4 @@
 #include <glib.h>
-#include <glib-unix.h>
 #include <gio/gio.h>
 #include <czmq.h>
 
@@ -27,9 +26,6 @@ struct _GPPQueue
   /* Worker Management */
   GHashTable *workerz;
   GQueue *available_workerz;
-
-  /* Main */
-  GMainLoop *loop;
 };
 
 G_DEFINE_TYPE (GPPQueue, gpp_queue, G_TYPE_OBJECT)
@@ -297,25 +293,4 @@ gpp_queue_start (GPPQueue *self)
   g_timeout_add (HEARTBEAT_INTERVAL / 1000, (GSourceFunc) do_heartbeat, self);
 
   return TRUE;
-}
-
-/* Main */
-
-static gboolean
-interrupted_cb (GMainLoop *loop)
-{
-  g_main_loop_quit (loop);
-  return FALSE;
-}
-
-int main (void)
-{
-  GPPQueue *self = gpp_queue_new ();
-  GMainLoop *loop = g_main_loop_new (NULL, FALSE);
-
-  g_unix_signal_add_full (G_PRIORITY_DEFAULT, SIGINT, (GSourceFunc) interrupted_cb, loop, NULL);
-  gpp_queue_start (self);
-  g_main_loop_run (loop);
-
-  return 0;
 }
