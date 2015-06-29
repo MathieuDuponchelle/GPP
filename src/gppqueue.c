@@ -207,6 +207,7 @@ send_heartbeat (gchar *id_string, Worker *worker, GPPQueue *self)
       ZFRAME_REUSE + ZFRAME_MORE);
   zframe_t *frame = zframe_new (PPP_HEARTBEAT, 1);
   zframe_send (&frame, self->backend, 0);
+  g_debug ("sent heartbeat to one worker\n");
 }
 
 static gboolean
@@ -287,7 +288,7 @@ gpp_queue_start (GPPQueue *self)
   if (self->backend_source)
     return FALSE;
 
-  self->backend_source = g_io_add_watch (g_io_channel_from_zmq_socket (self->backend),
+  self->backend_source = g_io_add_watch (self->backend_channel,
       G_IO_IN, (GIOFunc) callback_func, self);
 
   g_timeout_add (HEARTBEAT_INTERVAL / 1000, (GSourceFunc) do_heartbeat, self);
