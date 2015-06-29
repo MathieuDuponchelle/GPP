@@ -69,7 +69,6 @@ static gboolean callback_func(GIOChannel *channel, GIOCondition condition, GPPWo
   gboolean go_on;
 
   /* FIXME : error handling here, not sure what to do */
-  /* do { */
   go_on = FALSE;
 
   if (zmq_getsockopt(self->frontend, ZMQ_EVENTS, &status, &sizeof_status)) {
@@ -81,7 +80,6 @@ static gboolean callback_func(GIOChannel *channel, GIOCondition condition, GPPWo
     go_on = TRUE;
     s_handle_frontend (self);
   }
-  /*} while (go_on);*/
 
   return 1;
 }

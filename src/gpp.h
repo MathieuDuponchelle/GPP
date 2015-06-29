@@ -3,5 +3,6 @@
 
 #include "gppqueue.h"
 #include "gppworker.h"
+#include "gppclient.h"
 
 #endif

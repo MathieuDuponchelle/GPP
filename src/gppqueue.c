@@ -142,6 +142,7 @@ int s_handle_frontend (GPPQueue *self)
 {
   Worker *worker;
   zframe_t *worker_id_dup;
+  printf ("handling frontend\n");
   zmsg_t *msg = zmsg_recv (self->frontend);
   if (!msg) {
     return -1;

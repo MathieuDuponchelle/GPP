@@ -1,4 +1,4 @@
-sources = ['gppqueue.c', 'gppworker.c']
+sources = ['gppqueue.c', 'gppworker.c', 'gppclient.c']
 
 gpp = shared_library('gpp',
 		     sources,

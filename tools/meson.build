@@ -23,5 +23,7 @@ client_sources = ['ppclient.c']
 executable('ppclient',
 	   client_sources,
 	   install: true,
-	   dependencies: [zmqlib, czmqlib],
+	   dependencies: [gobject_dep],
+	   link_with: [gpp],
+	   include_directories: inc
 	   )
