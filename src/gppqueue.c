@@ -2,13 +2,8 @@
 #include <gio/gio.h>
 #include <czmq.h>
 
+#include "gpputils.h"
 #include "gppqueue.h"
-
-#define HEARTBEAT_LIVENESS  3
-#define HEARTBEAT_INTERVAL  G_USEC_PER_SEC
-
-#define PPP_READY       "\001"
-#define PPP_HEARTBEAT   "\002"
 
 struct _GPPQueue
 {
@@ -30,7 +25,7 @@ struct _GPPQueue
 
 G_DEFINE_TYPE (GPPQueue, gpp_queue, G_TYPE_OBJECT)
 
-static gboolean callback_func(GIOChannel *source, GIOCondition condition, GPPQueue *self);
+static gboolean check_socket_activity(GIOChannel *source, GIOCondition condition, GPPQueue *self);
 
 /* Worker management */
 
@@ -85,7 +80,7 @@ add_available_worker (GPPQueue *self, Worker *worker)
   g_queue_push_tail (self->available_workerz, worker);
   if (g_queue_get_length (self->available_workerz) == 1)
     self->frontend_source = g_io_add_watch(self->frontend_channel,
-        G_IO_IN, (GIOFunc) callback_func, self);
+        G_IO_IN, (GIOFunc) check_socket_activity, self);
 }
 
 static Worker *
@@ -100,7 +95,7 @@ add_new_worker (GPPQueue *self, zframe_t *identity)
 
 /* Messaging */
 
-int s_handle_backend (GPPQueue *self)
+int handle_backend (GPPQueue *self)
 {
   zmsg_t *msg = zmsg_recv (self->backend);
   Worker *worker = NULL;
@@ -138,15 +133,15 @@ int s_handle_backend (GPPQueue *self)
   return 0;
 }
 
-int s_handle_frontend (GPPQueue *self)
+static void
+handle_frontend (GPPQueue *self)
 {
   Worker *worker;
   zframe_t *worker_id_dup;
-  printf ("handling frontend\n");
   zmsg_t *msg = zmsg_recv (self->frontend);
-  if (!msg) {
-    return -1;
-  }
+
+  if (!msg)
+    return;
 
   worker = g_queue_pop_head (self->available_workerz);
   if (g_queue_get_length (self->available_workerz) == 0) {
@@ -159,10 +154,9 @@ int s_handle_frontend (GPPQueue *self)
 
   g_info ("sending task to worker %s", worker->id_string);
   zmsg_send (&msg, self->backend);
-  return 0;
 }
 
-static gboolean callback_func(GIOChannel *source, GIOCondition condition, GPPQueue *self)
+static gboolean check_socket_activity(GIOChannel *source, GIOCondition condition, GPPQueue *self)
 {
   uint32_t status;
   size_t sizeof_status = sizeof(status);
@@ -178,7 +172,7 @@ static gboolean callback_func(GIOChannel *source, GIOCondition condition, GPPQue
     }
 
     if ((status & ZMQ_POLLIN) != 0) {
-      s_handle_backend (self);
+      handle_backend (self);
       go_on = TRUE;
     }
 
@@ -192,7 +186,7 @@ static gboolean callback_func(GIOChannel *source, GIOCondition condition, GPPQue
 
     if ((status & ZMQ_POLLIN) != 0) {
       go_on = TRUE;
-      s_handle_frontend (self);
+      handle_frontend (self);
     }
   } while (go_on);
 
@@ -222,16 +216,6 @@ do_heartbeat (GPPQueue *self)
 }
 
 /* Initialization */
-
-static GIOChannel *
-g_io_channel_from_zmq_socket (void *socket)
-{
-  int fd;
-  size_t sizeof_fd = sizeof(fd);
-  if(zmq_getsockopt(socket, ZMQ_FD, &fd, &sizeof_fd))
-    perror("retrieving zmq fd");
-  return g_io_channel_unix_new(fd);
-}
 
 static void
 create_channels (GPPQueue *self)
@@ -290,7 +274,7 @@ gpp_queue_start (GPPQueue *self)
     return FALSE;
 
   self->backend_source = g_io_add_watch (self->backend_channel,
-      G_IO_IN, (GIOFunc) callback_func, self);
+      G_IO_IN, (GIOFunc) check_socket_activity, self);
 
   g_timeout_add (HEARTBEAT_INTERVAL / 1000, (GSourceFunc) do_heartbeat, self);
 

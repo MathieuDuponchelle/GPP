@@ -1,13 +1,12 @@
+#include "gpputils.h"
 #include "gppworker.h"
 
 #include "czmq.h"
-#define HEARTBEAT_LIVENESS  3
-#define HEARTBEAT_INTERVAL  G_USEC_PER_SEC
+
 #define INTERVAL_INIT       1000
 #define INTERVAL_MAX       32000
 
-#define PPP_READY       "\001"
-#define PPP_HEARTBEAT   "\002"
+/* Structure definitions */
 
 struct _GPPWorker
 {
@@ -30,7 +29,7 @@ G_DEFINE_TYPE (GPPWorker, gpp_worker, G_TYPE_OBJECT);
 /* Messaging */
 
 static void
-s_handle_frontend (GPPWorker *self)
+handle_frontend (GPPWorker *self)
 {
   zmsg_t *msg = zmsg_recv (self->frontend);
   if (!msg)
@@ -62,7 +61,8 @@ s_handle_frontend (GPPWorker *self)
   self->interval = INTERVAL_INIT;
 }
 
-static gboolean callback_func(GIOChannel *channel, GIOCondition condition, GPPWorker *self)
+static gboolean
+check_socket_activity(GIOChannel *channel, GIOCondition condition, GPPWorker *self)
 {
   uint32_t status;
   size_t sizeof_status = sizeof(status);
@@ -78,53 +78,13 @@ static gboolean callback_func(GIOChannel *channel, GIOCondition condition, GPPWo
 
   if ((status & ZMQ_POLLIN) != 0) {
     go_on = TRUE;
-    s_handle_frontend (self);
+    handle_frontend (self);
   }
 
   return 1;
 }
 
-  static GIOChannel *
-g_io_channel_from_zmq_socket (void *socket)
-{
-  int fd;
-  size_t sizeof_fd = sizeof(fd);
-  if (zmq_getsockopt(socket, ZMQ_FD, &fd, &sizeof_fd))
-    perror("retrieving zmq fd");
-
-  return g_io_channel_unix_new(fd);
-}
-
-/* GObject */
-
-  static void
-dispose (GObject *object)
-{
-  GPPWorker *self = GPP_WORKER (object);
-
-  zctx_destroy (&self->ctx);
-}
-
-  static void
-gpp_worker_class_init (GPPWorkerClass *klass)
-{
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
-
-  gobject_class->dispose = dispose;
-}
-
-  static void
-gpp_worker_init (GPPWorker *self)
-{
-  self->interval = INTERVAL_INIT;
-  self->ctx = zctx_new ();
-}
-
-  GPPWorker *
-gpp_worker_new (void)
-{
-  return g_object_new (GPP_TYPE_WORKER, NULL);
-}
+/* Heartbeating / Reconnecting */
 
 static gboolean do_heartbeat (GPPWorker *self);
 
@@ -136,7 +96,7 @@ do_start (GPPWorker *self)
   self->frontend_channel = g_io_channel_from_zmq_socket (self->frontend);
   self->liveness = HEARTBEAT_LIVENESS;
   self->frontend_source = g_io_add_watch (self->frontend_channel,
-      G_IO_IN, (GIOFunc) callback_func, self);
+      G_IO_IN, (GIOFunc) check_socket_activity, self);
 
   g_timeout_add (HEARTBEAT_INTERVAL / 1000, (GSourceFunc) do_heartbeat, self);
 
@@ -144,7 +104,7 @@ do_start (GPPWorker *self)
   zframe_send (&frame, self->frontend, 0);
 
   /* We need to do that for some reason ... */
-  callback_func (self->frontend_channel, G_IO_IN, self);
+  check_socket_activity (self->frontend_channel, G_IO_IN, self);
 
   return FALSE;
 }
@@ -170,9 +130,36 @@ do_heartbeat (GPPWorker *self)
   zframe_t *frame = zframe_new (PPP_HEARTBEAT, 1);
   zframe_send (&frame, self->frontend, 0);
   /* We need to do that for some reason ... */
-  callback_func (self->frontend_channel, G_IO_IN, self);
+  check_socket_activity (self->frontend_channel, G_IO_IN, self);
   return TRUE;
 }
+
+/* GObject */
+
+static void
+dispose (GObject *object)
+{
+  GPPWorker *self = GPP_WORKER (object);
+
+  zctx_destroy (&self->ctx);
+}
+
+static void
+gpp_worker_class_init (GPPWorkerClass *klass)
+{
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+
+  gobject_class->dispose = dispose;
+}
+
+static void
+gpp_worker_init (GPPWorker *self)
+{
+  self->interval = INTERVAL_INIT;
+  self->ctx = zctx_new ();
+}
+
+/* API */
 
 gboolean
 gpp_worker_set_task_done (GPPWorker *self, gboolean success)
@@ -182,7 +169,7 @@ gpp_worker_set_task_done (GPPWorker *self, gboolean success)
 
   zmsg_send (&self->current_task, self->frontend);
   self->current_task = NULL;
-  callback_func (self->frontend_channel, G_IO_IN, self);
+  check_socket_activity (self->frontend_channel, G_IO_IN, self);
   return TRUE;
 }
 
@@ -200,4 +187,10 @@ gpp_worker_start (GPPWorker *self, GPPWorkerTaskHandler handler, gpointer user_d
   do_start (self);
 
   return TRUE;
+}
+
+GPPWorker *
+gpp_worker_new (void)
+{
+  return g_object_new (GPP_TYPE_WORKER, NULL);
 }

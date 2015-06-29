@@ -1,12 +1,10 @@
-//  Lazy Pirate client
-//  Use zmq_poll to do a safe request-reply
-//  To run, start lpserver and then randomly kill/restart it
+#include <gio/gio.h>
+#include <czmq.h>
 
+#include "gpputils.h"
 #include "gppclient.h"
 
-#include <gio/gio.h>
-#include "czmq.h"
-#define REQUEST_RETRIES     3       //  Before we abandon
+#define REQUEST_RETRIES     3
 #define SERVER_ENDPOINT     "tcp://localhost:5555"
 
 struct _GPPClient
@@ -25,14 +23,14 @@ s_handle_backend (GPPClient *self)
 {
   char *reply = zstr_recv (self->backend);
   if (!reply)
-    return;      //  Interrupted
+    return;
 
-  printf ("I: server replied OK (%s)\n", reply);
+  g_info ("Server replied %s\n", reply);
 
   free (reply);
 }
 
-static gboolean callback_func(GIOChannel *channel, GIOCondition condition, GPPClient *self)
+static gboolean socket_activity(GIOChannel *channel, GIOCondition condition, GPPClient *self)
 {
   uint32_t status;
   size_t sizeof_status = sizeof(status);
@@ -70,17 +68,6 @@ gpp_client_class_init (GPPClientClass *klass)
   gobject_class->dispose = dispose;
 }
 
-static GIOChannel *
-g_io_channel_from_zmq_socket (void *socket)
-{
-  int fd;
-  size_t sizeof_fd = sizeof(fd);
-  if (zmq_getsockopt(socket, ZMQ_FD, &fd, &sizeof_fd))
-    perror("retrieving zmq fd");
-
-  return g_io_channel_unix_new(fd);
-}
-
 static void
 gpp_client_init (GPPClient *self)
 {
@@ -88,7 +75,7 @@ gpp_client_init (GPPClient *self)
   self->backend = zsocket_new (self->ctx, ZMQ_REQ);
   zsocket_connect (self->backend, SERVER_ENDPOINT);
   self->backend_source = g_io_add_watch (g_io_channel_from_zmq_socket (self->backend),
-      G_IO_IN, (GIOFunc) callback_func, self);
+      G_IO_IN, (GIOFunc) socket_activity, self);
 }
 
 GPPClient *
