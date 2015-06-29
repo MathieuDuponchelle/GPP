@@ -3,7 +3,9 @@ worker_sources = ['ppworker.c']
 executable('ppworker',
 	   worker_sources,
 	   install: true,
-	   dependencies: [zmqlib, czmqlib, gobject_dep],
+	   dependencies: [gobject_dep, czmqlib],
+	   link_with: [gpp],
+	   include_directories: inc
 	   )
 
 queue_sources = ['ppqueue.c']
