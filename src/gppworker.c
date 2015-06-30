@@ -215,8 +215,6 @@ gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
 /**
  * gpp_worker_start:
  * @self: A #GPPWorker that will start handling requests.
- * @handler: The #GPPWorkerTaskHandler to call when a request is received.
- * @user_data: (allow-none): the data to pass to @handler.
  *
  * This will make @self start handling requests.
  *

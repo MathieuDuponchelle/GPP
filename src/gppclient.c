@@ -15,6 +15,17 @@ enum
 
 static guint gpp_client_signals[LAST_SIGNAL] = { 0 };
 
+/**
+ * SECTION: gppclient
+ *
+ * #GPPClient sends requests to a #GPPQueue, and emits a signal
+ * with the possible reply and the status of the task once it has been executed.
+ *
+ * A per-request retry limit can be set when calling gpp_client_send_request()
+ *
+ * {{ ppclient.markdown }}
+ */
+
 struct _GPPClient
 {
   GObject parent;
@@ -101,6 +112,15 @@ gpp_client_class_init (GPPClientClass *klass)
 
   gobject_class->dispose = dispose;
 
+  /**
+   * GPPClient::request-handled:
+   * @object: The #GPPClient
+   * @success: Whether the request was successfully executed
+   * @reply: The reply provided by the #GPPWorker , as a simple string
+   *
+   * Connect to this signal to be notified when the current request
+   * has been handled.
+   */
   gpp_client_signals[REQUEST_HANDLED] =
       g_signal_new ("request-handled", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_FIRST, 0, NULL, NULL, g_cclosure_marshal_generic,
@@ -117,12 +137,33 @@ gpp_client_init (GPPClient *self)
       G_IO_IN, (GIOFunc) socket_activity, self);
 }
 
+/* API */
+
+/**
+ * gpp_client_new:
+ *
+ * Create a new #GPPClient.
+ * Use it to send requests with gpp_client_send_request()
+ *
+ * Returns: the newly-created #GPPClient.
+ */
 GPPClient *
 gpp_client_new (void)
 {
   return g_object_new (GPP_TYPE_CLIENT, NULL);
 }
 
+/**
+ * gpp_client_send_request:
+ * @self: A #GPPClient that will send the request.
+ * @request: A simple string that will be passed to the #GPPWorker.
+ * @retries: The number of times to retry before signaling that
+ * the request was handled, -1 means retry forever.
+ *
+ * This will make @self send @request to a #GPPQueue.
+ *
+ * Returns: %TRUE if @request was made, %FALSE if one is already being made.
+ */
 gboolean
 gpp_client_send_request (GPPClient *self,
                          const gchar *request,

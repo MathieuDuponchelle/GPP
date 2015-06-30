@@ -26,9 +26,9 @@
     <SYMBOLS>
       <SYMBOL>GPPWorker</SYMBOL>
       <SYMBOL>GPPWorkerClass</SYMBOL>
-      <SYMBOL>gpp_worker_set_task_done</SYMBOL>
-      <SYMBOL>gpp_worker_start</SYMBOL>
       <SYMBOL>gpp_worker_new</SYMBOL>
+      <SYMBOL>gpp_worker_start</SYMBOL>
+      <SYMBOL>gpp_worker_set_task_done</SYMBOL>
     </SYMBOLS>
   </SECTION>
   <SECTION>
@@ -37,8 +37,8 @@
     <SYMBOLS>
       <SYMBOL>GPPClient</SYMBOL>
       <SYMBOL>GPPClientClass</SYMBOL>
-      <SYMBOL>gpp_client_send_request</SYMBOL>
       <SYMBOL>gpp_client_new</SYMBOL>
+      <SYMBOL>gpp_client_send_request</SYMBOL>
     </SYMBOLS>
   </SECTION>
 </SECTIONS>
