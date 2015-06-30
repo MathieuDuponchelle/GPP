@@ -5,7 +5,7 @@ which uses zeromq internally.
 
 GPP is *not* a zeromq GLib wrapper.
 
-It provides a #GPPQueue object, which relays requests from a #GPPClient to a #GPPWorker, and replies
+It provides a GPPQueue object, which relays requests from a GPPClient to a GPPWorker, and replies
 from the worker to the client, as simple strings.
 
 It implements heartbeating, which means that if a worker fails in some way, the client will be able
@@ -34,7 +34,7 @@ You can see available options with:
 mesonconf
 ```
 
-You canset them with the -D flag,
+You can set them with the -D flag,
 for example:
 
 ```
@@ -43,4 +43,4 @@ meson -Ddisable-introspection ..
 
 # Documentation and Usage
 
-Visit [the slate documentation](http://mathieuduponchelle.github.io/gpp_documentation) or read the source.
+Visit [the slate documentation](http://mathieuduponchelle.github.io/gpp_documentation/?c) or read the source.
