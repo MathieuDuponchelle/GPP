@@ -36,11 +36,13 @@ handle_frontend (GPPWorker *self)
     return;
 
   if (zmsg_size (msg) == 3) {
+    char *request = zframe_strdup (zmsg_last (msg));
     g_info ("I: normal reply\n");
     self->liveness = HEARTBEAT_LIVENESS;
     self->current_task = msg;
-    if (!self->handler (self, self->user_data))
-      gpp_worker_set_task_done (self, FALSE);
+    if (!self->handler (self, request, self->user_data))
+      gpp_worker_set_task_done (self, NULL, FALSE);
+    free (request);
   } else {
     if (zmsg_size (msg) == 1) {
       zframe_t *frame = zmsg_first (msg);
@@ -162,10 +164,18 @@ gpp_worker_init (GPPWorker *self)
 /* API */
 
 gboolean
-gpp_worker_set_task_done (GPPWorker *self, gboolean success)
+gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
 {
+  zframe_t *request_frame = zmsg_last (self->current_task);
+
   if (!self->current_task)
     return FALSE;
+
+  if (!success) {
+    zframe_reset (request_frame, PPP_KO, 1);
+  } else {
+    zframe_reset (request_frame, reply, strlen (reply) + 1);
+  }
 
   zmsg_send (&self->current_task, self->frontend);
   self->current_task = NULL;

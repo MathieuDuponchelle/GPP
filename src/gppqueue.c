@@ -33,6 +33,7 @@ typedef struct {
     zframe_t *identity;
     gchar *id_string;
     gint64 expiry;
+    zframe_t *current_client;
 } Worker;
 
 static Worker *
@@ -41,6 +42,7 @@ worker_new (zframe_t *identity)
     Worker *self = g_slice_new (Worker);
     self->identity = identity;
     self->id_string = zframe_strhex (identity);
+    self->current_client = NULL;
     return self;
 }
 
@@ -49,6 +51,8 @@ worker_destroy (Worker *self)
 {
   zframe_destroy (&self->identity);
   free (self->id_string);
+  if (self->current_client)
+    zframe_destroy (&self->current_client);
   g_slice_free (Worker, self);
 }
 
@@ -56,7 +60,20 @@ static gboolean
 maybe_purge_worker (gchar *id_string, Worker *worker, GPPQueue *self)
 {
   if (g_get_monotonic_time () > worker->expiry) {
-    g_info ("purging worker with id %s\n", worker->id_string);
+    g_info ("purging worker with id %s", worker->id_string);
+    if (worker->current_client) {
+      zframe_t *client_id_dup = zframe_dup (worker->current_client);
+      zframe_t *ko_frame = zframe_new (PPP_KO, 1);
+      zframe_t *empty_frame = zframe_new_empty ();
+      zmsg_t *msg = zmsg_new();
+      zmsg_prepend (msg, &ko_frame);
+      zmsg_prepend (msg, &empty_frame);
+      zmsg_prepend (msg, &client_id_dup);
+      zmsg_send (&msg, self->frontend);
+
+      g_info ("Worker had a client, sent KO message");
+    }
+
     g_queue_remove (self->available_workerz, worker);
     return TRUE;
   }
@@ -116,7 +133,6 @@ int handle_backend (GPPQueue *self)
 
     if (memcmp (zframe_data (frame), PPP_READY, 1)
         &&  memcmp (zframe_data (frame), PPP_HEARTBEAT, 1)) {
-      printf ("E: invalid message from worker");
       zmsg_dump (msg);
     }
     zmsg_destroy (&msg);
@@ -124,6 +140,8 @@ int handle_backend (GPPQueue *self)
   else {
     g_info ("worker %s has completed a task !", worker->id_string);
     zmsg_send (&msg, self->frontend);
+    zframe_destroy (&worker->current_client);
+    worker->current_client = NULL;
     add_available_worker (self, worker);
   }
 
@@ -149,6 +167,7 @@ handle_frontend (GPPQueue *self)
     self->frontend_source = 0;
   }
 
+  worker->current_client = zframe_dup (zmsg_first(msg));
   worker_id_dup = zframe_dup (worker->identity);
   zmsg_prepend (msg, &worker_id_dup);
 

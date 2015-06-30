@@ -10,5 +10,6 @@ GIOChannel * g_io_channel_from_zmq_socket (void *socket);
 
 #define PPP_READY       "\001"
 #define PPP_HEARTBEAT   "\002"
+#define PPP_KO          "\003"
 
 #endif
