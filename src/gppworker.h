@@ -9,7 +9,7 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE(GPPWorker, gpp_worker, GPP, WORKER, GObject)
 
-typedef gboolean (*GPPWorkerTaskHandler)(GPPWorker *, const gchar *request, gpointer user_callback);
+typedef gboolean (*GPPWorkerTaskHandler)(GPPWorker *worker, const gchar *request, gpointer user_callback);
 
 GPPWorker * gpp_worker_new (void);
 gboolean gpp_worker_start (GPPWorker *self, GPPWorkerTaskHandler handler, gpointer user_data);

@@ -6,14 +6,9 @@
 </SYMBOLS>
   </SECTION>
   <SECTION>
-    <FILE>gpp-client</FILE>
-    <TITLE>GPPClient</TITLE>
+    <TITLE>Introduction</TITLE>
     <SYMBOLS>
-      <SYMBOL>GPPClient</SYMBOL>
-      <SYMBOL>GPPClientClass</SYMBOL>
-      <SYMBOL>gpp_client_send_request</SYMBOL>
-      <SYMBOL>gpp_client_new</SYMBOL>
-    </SYMBOLS>
+  </SYMBOLS>
   </SECTION>
   <SECTION>
     <FILE>gpp-queue</FILE>
@@ -21,8 +16,8 @@
     <SYMBOLS>
       <SYMBOL>GPPQueue</SYMBOL>
       <SYMBOL>GPPQueueClass</SYMBOL>
-      <SYMBOL>gpp_queue_start</SYMBOL>
       <SYMBOL>gpp_queue_new</SYMBOL>
+      <SYMBOL>gpp_queue_start</SYMBOL>
     </SYMBOLS>
   </SECTION>
   <SECTION>
@@ -34,6 +29,16 @@
       <SYMBOL>gpp_worker_set_task_done</SYMBOL>
       <SYMBOL>gpp_worker_start</SYMBOL>
       <SYMBOL>gpp_worker_new</SYMBOL>
+    </SYMBOLS>
+  </SECTION>
+  <SECTION>
+    <FILE>gpp-client</FILE>
+    <TITLE>GPPClient</TITLE>
+    <SYMBOLS>
+      <SYMBOL>GPPClient</SYMBOL>
+      <SYMBOL>GPPClientClass</SYMBOL>
+      <SYMBOL>gpp_client_send_request</SYMBOL>
+      <SYMBOL>gpp_client_new</SYMBOL>
     </SYMBOLS>
   </SECTION>
 </SECTIONS>

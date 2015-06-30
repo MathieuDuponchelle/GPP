@@ -8,6 +8,16 @@
 
 /* Structure definitions */
 
+/**
+ * SECTION: gppworker
+ *
+ * #GPPWorker receives requests from a #GPPQueue, transmits them
+ * as a simple string to the user, and notifies the queue when the
+ * user marks the task as done.
+ *
+ * {{ ppworker.markdown }}
+ */
+
 struct _GPPWorker
 {
   GObject parent;
@@ -163,6 +173,16 @@ gpp_worker_init (GPPWorker *self)
 
 /* API */
 
+/**
+ * gpp_worker_set_task_done:
+ * @self: A #GPPWorker.
+ * @reply: (allow-none): A string that will be passed to the client.
+ * @success: Whether the task was successfully handled.
+ *
+ * Call this function when your worker has finished handling a task.
+ *
+ * Returns: %TRUE if the task was marked as done, %FALSE otherwise.
+ */
 gboolean
 gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
 {
@@ -183,6 +203,16 @@ gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
   return TRUE;
 }
 
+/**
+ * gpp_worker_start:
+ * @self: A #GPPWorker that will start handling requests.
+ * @handler: The #GPPWorkerTaskHandler to call when a request is received.
+ * @user_data: (allow-none): the data to pass to @handler.
+ *
+ * This will make @self start handling requests.
+ *
+ * Returns: %TRUE if @self could be started, %FALSE if it was already.
+ */
 gboolean
 gpp_worker_start (GPPWorker *self, GPPWorkerTaskHandler handler, gpointer user_data)
 {
@@ -199,6 +229,15 @@ gpp_worker_start (GPPWorker *self, GPPWorkerTaskHandler handler, gpointer user_d
   return TRUE;
 }
 
+/**
+ * gpp_worker_new:
+ *
+ * Create a new #GPPWorker, which doesn't yet listen to request from
+ * the #GPPQueue.
+ * Start it with gpp_worker_start()
+ *
+ * Returns: the newly-created #GPPWorker.
+ */
 GPPWorker *
 gpp_worker_new (void)
 {

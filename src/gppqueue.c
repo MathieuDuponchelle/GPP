@@ -5,6 +5,25 @@
 #include "gpputils.h"
 #include "gppqueue.h"
 
+/**
+ * SECTION: Introduction
+ *
+ * {{ introduction.markdown }}
+ */
+
+/**
+ * SECTION: gppqueue
+ *
+ * #GPPQueue routes requests from #GPPClient (s) to #GPPWorker (s).
+ *
+ * {{ ppqueue.markdown }}
+ *
+ * It will detect if a worker stopped answering heartbeats, and
+ * inform the client it was working for if there was one.
+ *
+ * It will pick workers on a least-recently-used basis.
+ */
+
 struct _GPPQueue
 {
   GObject parent;
@@ -280,12 +299,29 @@ gpp_queue_init (GPPQueue *self)
 
 /* API */
 
+/**
+ * gpp_queue_new:
+ *
+ * Create a new #GPPQueue, which doesn't yet listen to #GPPWorker (s).
+ * Start it with gpp_queue_start()
+ *
+ * Returns: the newly-created #GPPQueue.
+ */
 GPPQueue *
 gpp_queue_new (void)
 {
   return g_object_new (GPP_TYPE_QUEUE, NULL);
 }
 
+/**
+ * gpp_queue_start:
+ * @self: A #GPPQueue to start.
+ *
+ * Makes @self start to route requests to available workers,
+ * and check worker's liveness.
+ *
+ * Returns: %TRUE if the queue was started, %FALSE if it was already.
+ */
 gboolean
 gpp_queue_start (GPPQueue *self)
 {
