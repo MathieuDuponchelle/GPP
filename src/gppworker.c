@@ -18,9 +18,10 @@
  * {{ ppworker.markdown }}
  */
 
-struct _GPPWorker
+#define GET_PRIV(self) (gpp_worker_get_instance_private (GPP_WORKER (self)))
+
+typedef struct _GPPWorkerPrivate
 {
-  GObject parent;
   zctx_t *ctx;
 
   void *frontend;
@@ -30,34 +31,35 @@ struct _GPPWorker
   guint liveness;
   guint interval;
   zmsg_t *current_task;
-  GPPWorkerTaskHandler handler;
-  gpointer user_data;
-};
+} GPPWorkerPrivate;
 
-G_DEFINE_TYPE (GPPWorker, gpp_worker, G_TYPE_OBJECT);
+G_DEFINE_TYPE_WITH_CODE (GPPWorker, gpp_worker, G_TYPE_OBJECT,
+    G_ADD_PRIVATE (GPPWorker));
 
 /* Messaging */
 
 static void
 handle_frontend (GPPWorker *self)
 {
-  zmsg_t *msg = zmsg_recv (self->frontend);
+  GPPWorkerPrivate *priv = GET_PRIV (self);
+  GPPWorkerClass *klass = GPP_WORKER_GET_CLASS (self);
+  zmsg_t *msg = zmsg_recv (priv->frontend);
   if (!msg)
     return;
 
   if (zmsg_size (msg) == 3) {
     char *request = zframe_strdup (zmsg_last (msg));
     g_info ("I: normal reply\n");
-    self->liveness = HEARTBEAT_LIVENESS;
-    self->current_task = msg;
-    if (!self->handler (self, request, self->user_data))
+    priv->liveness = HEARTBEAT_LIVENESS;
+    priv->current_task = msg;
+    if (!klass->handle_request (self, request))
       gpp_worker_set_task_done (self, NULL, FALSE);
     free (request);
   } else {
     if (zmsg_size (msg) == 1) {
       zframe_t *frame = zmsg_first (msg);
       if (memcmp (zframe_data (frame), PPP_HEARTBEAT, 1) == 0) {
-        self->liveness = HEARTBEAT_LIVENESS;
+        priv->liveness = HEARTBEAT_LIVENESS;
         g_debug ("got heartbeat from queue !\n");
       } else {
         g_warning ("E: invalid message\n");
@@ -70,12 +72,13 @@ handle_frontend (GPPWorker *self)
       zmsg_dump (msg);
     }
   }
-  self->interval = INTERVAL_INIT;
+  priv->interval = INTERVAL_INIT;
 }
 
 static gboolean
 check_socket_activity(GIOChannel *channel, GIOCondition condition, GPPWorker *self)
 {
+  GPPWorkerPrivate *priv = GET_PRIV (self);
   uint32_t status;
   size_t sizeof_status = sizeof(status);
   gboolean go_on;
@@ -83,7 +86,7 @@ check_socket_activity(GIOChannel *channel, GIOCondition condition, GPPWorker *se
   /* FIXME : error handling here, not sure what to do */
   go_on = FALSE;
 
-  if (zmq_getsockopt(self->frontend, ZMQ_EVENTS, &status, &sizeof_status)) {
+  if (zmq_getsockopt(priv->frontend, ZMQ_EVENTS, &status, &sizeof_status)) {
     perror("retrieving event status");
     return 0;
   }
@@ -103,20 +106,21 @@ static gboolean do_heartbeat (GPPWorker *self);
 static gboolean
 do_start (GPPWorker *self)
 {
-  self->frontend = zsocket_new (self->ctx, ZMQ_DEALER);
-  zsocket_connect (self->frontend, "tcp://localhost:5556");
-  self->frontend_channel = g_io_channel_from_zmq_socket (self->frontend);
-  self->liveness = HEARTBEAT_LIVENESS;
-  self->frontend_source = g_io_add_watch (self->frontend_channel,
+  GPPWorkerPrivate *priv = GET_PRIV (self);
+  priv->frontend = zsocket_new (priv->ctx, ZMQ_DEALER);
+  zsocket_connect (priv->frontend, "tcp://localhost:5556");
+  priv->frontend_channel = g_io_channel_from_zmq_socket (priv->frontend);
+  priv->liveness = HEARTBEAT_LIVENESS;
+  priv->frontend_source = g_io_add_watch (priv->frontend_channel,
       G_IO_IN, (GIOFunc) check_socket_activity, self);
 
   g_timeout_add (HEARTBEAT_INTERVAL / 1000, (GSourceFunc) do_heartbeat, self);
 
   zframe_t *frame = zframe_new (PPP_READY, 1);
-  zframe_send (&frame, self->frontend, 0);
+  zframe_send (&frame, priv->frontend, 0);
 
   /* We need to do that for some reason ... */
-  check_socket_activity (self->frontend_channel, G_IO_IN, self);
+  check_socket_activity (priv->frontend_channel, G_IO_IN, self);
 
   return FALSE;
 }
@@ -124,25 +128,26 @@ do_start (GPPWorker *self)
 static gboolean
 do_heartbeat (GPPWorker *self)
 {
-  if (--self->liveness == 0) {
+  GPPWorkerPrivate *priv = GET_PRIV (self);
+  if (--priv->liveness == 0) {
     g_warning ("W: heartbeat failure, can't reach queue\n");
-    g_warning ("W: reconnecting in %zd msec...\n", self->interval);
-    g_source_remove (self->frontend_source);
-    self->frontend_source = 0;
-    g_io_channel_unref (self->frontend_channel);
+    g_warning ("W: reconnecting in %zd msec...\n", priv->interval);
+    g_source_remove (priv->frontend_source);
+    priv->frontend_source = 0;
+    g_io_channel_unref (priv->frontend_channel);
 
-    if (self->interval < INTERVAL_MAX)
-      self->interval *= 2;
+    if (priv->interval < INTERVAL_MAX)
+      priv->interval *= 2;
 
-    zsocket_destroy (self->ctx, self->frontend);
-    g_timeout_add (self->interval, (GSourceFunc) do_start, self);
+    zsocket_destroy (priv->ctx, priv->frontend);
+    g_timeout_add (priv->interval, (GSourceFunc) do_start, self);
     return FALSE;
   }
 
   zframe_t *frame = zframe_new (PPP_HEARTBEAT, 1);
-  zframe_send (&frame, self->frontend, 0);
+  zframe_send (&frame, priv->frontend, 0);
   /* We need to do that for some reason ... */
-  check_socket_activity (self->frontend_channel, G_IO_IN, self);
+  check_socket_activity (priv->frontend_channel, G_IO_IN, self);
   return TRUE;
 }
 
@@ -152,8 +157,9 @@ static void
 dispose (GObject *object)
 {
   GPPWorker *self = GPP_WORKER (object);
+  GPPWorkerPrivate *priv = GET_PRIV (self);
 
-  zctx_destroy (&self->ctx);
+  zctx_destroy (&priv->ctx);
 }
 
 static void
@@ -161,14 +167,16 @@ gpp_worker_class_init (GPPWorkerClass *klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
+  klass->handle_request = NULL;
   gobject_class->dispose = dispose;
 }
 
 static void
 gpp_worker_init (GPPWorker *self)
 {
-  self->interval = INTERVAL_INIT;
-  self->ctx = zctx_new ();
+  GPPWorkerPrivate *priv = GET_PRIV (self);
+  priv->interval = INTERVAL_INIT;
+  priv->ctx = zctx_new ();
 }
 
 /* API */
@@ -186,9 +194,10 @@ gpp_worker_init (GPPWorker *self)
 gboolean
 gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
 {
-  zframe_t *request_frame = zmsg_last (self->current_task);
+  GPPWorkerPrivate *priv = GET_PRIV (self);
+  zframe_t *request_frame = zmsg_last (priv->current_task);
 
-  if (!self->current_task)
+  if (!priv->current_task)
     return FALSE;
 
   if (!success) {
@@ -197,9 +206,9 @@ gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
     zframe_reset (request_frame, reply, strlen (reply) + 1);
   }
 
-  zmsg_send (&self->current_task, self->frontend);
-  self->current_task = NULL;
-  check_socket_activity (self->frontend_channel, G_IO_IN, self);
+  zmsg_send (&priv->current_task, priv->frontend);
+  priv->current_task = NULL;
+  check_socket_activity (priv->frontend_channel, G_IO_IN, self);
   return TRUE;
 }
 
@@ -214,16 +223,16 @@ gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success)
  * Returns: %TRUE if @self could be started, %FALSE if it was already.
  */
 gboolean
-gpp_worker_start (GPPWorker *self, GPPWorkerTaskHandler handler, gpointer user_data)
+gpp_worker_start (GPPWorker *self)
 {
-  if (self->frontend_source)
+  GPPWorkerPrivate *priv = GET_PRIV (self);
+  GPPWorkerClass *klass = GPP_WORKER_GET_CLASS (self);
+  if (priv->frontend_source)
     return FALSE;
 
-  if (!handler)
+  if (!klass->handle_request)
     return FALSE;
 
-  self->handler = handler;
-  self->user_data = user_data;
   do_start (self);
 
   return TRUE;
