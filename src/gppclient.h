@@ -14,8 +14,6 @@ typedef void (*GPPClientTaskDoneHandler)(GPPClient *, const gchar *reply, gboole
 GPPClient * gpp_client_new (void);
 gboolean gpp_client_send_request (GPPClient *self,
                                   const gchar *json_request,
-                                  gint retries,
-                                  GPPClientTaskDoneHandler handler,
-                                  gpointer user_data);
+                                  gint retries);
 
 #endif

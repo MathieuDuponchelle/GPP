@@ -7,6 +7,14 @@
 #define REQUEST_RETRIES     3
 #define SERVER_ENDPOINT     "tcp://localhost:5555"
 
+enum
+{
+  REQUEST_HANDLED,
+  LAST_SIGNAL
+};
+
+static guint gpp_client_signals[LAST_SIGNAL] = { 0 };
+
 struct _GPPClient
 {
   GObject parent;
@@ -15,8 +23,6 @@ struct _GPPClient
   void *backend;
   guint backend_source;
 
-  GPPClientTaskDoneHandler handler;
-  gpointer user_data;
   const gchar *current_request;
   gint retries_left;
 };
@@ -41,18 +47,17 @@ s_handle_backend (GPPClient *self)
       g_debug ("Job failed");
       if (self->retries_left == 0) {
         g_info ("Failed, not retrying anymore");
-        self->handler (self, NULL, FALSE, self->user_data);
+        g_signal_emit (self, gpp_client_signals[REQUEST_HANDLED], 0, FALSE, NULL);
       } else {
         if (self->retries_left != -1)
           self->retries_left--;
         g_debug ("Retrying, retries left : %d", self->retries_left);
-        gpp_client_send_request (self,
-            last_request, self->retries_left, self->handler, self->user_data);
+        gpp_client_send_request (self, last_request, self->retries_left);
       }
     } else {
       zframe_t *reply_frame = zmsg_last (msg);
       char *reply = zframe_strdup (reply_frame);
-      self->handler (self, reply, TRUE, self->user_data);
+      g_signal_emit (self, gpp_client_signals[REQUEST_HANDLED], 0, TRUE, reply);
       free (reply);
     }
   }
@@ -95,6 +100,11 @@ gpp_client_class_init (GPPClientClass *klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
   gobject_class->dispose = dispose;
+
+  gpp_client_signals[REQUEST_HANDLED] =
+      g_signal_new ("request-handled", G_TYPE_FROM_CLASS (klass),
+      G_SIGNAL_RUN_FIRST, 0, NULL, NULL, g_cclosure_marshal_generic,
+      G_TYPE_NONE, 2, G_TYPE_BOOLEAN, G_TYPE_STRING);
 }
 
 static void
@@ -116,18 +126,11 @@ gpp_client_new (void)
 gboolean
 gpp_client_send_request (GPPClient *self,
                          const gchar *request,
-                         gint retries,
-                         GPPClientTaskDoneHandler handler,
-                         gpointer user_data)
+                         gint retries)
 {
-  if (!handler)
-    return FALSE;
-
   if (self->current_request)
     return FALSE;
 
-  self->handler = handler;
-  self->user_data = user_data;
   self->current_request = request;
   self->retries_left = retries;
 

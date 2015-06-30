@@ -1,7 +1,3 @@
-//  Lazy Pirate client
-//  Use zmq_poll to do a safe request-reply
-//  To run, start lpserver and then randomly kill/restart it
-
 #include <glib-unix.h>
 #include "gpp.h"
 
@@ -17,13 +13,13 @@ make_new_task (void)
 }
 
 static void
-task_done (GPPClient *client, const gchar *reply, gboolean success, gpointer unused)
+task_done_cb (GPPClient *client, gboolean success, const gchar *reply, gpointer unused)
 {
   if (!success)
     g_print ("task failed\n");
   else
     g_print ("task succeeded : %s\n", reply);
-  gpp_client_send_request (client, make_new_task (), -1, task_done, NULL);
+  gpp_client_send_request (client, make_new_task (), -1);
 }
 
 static gboolean
@@ -39,7 +35,8 @@ int main (void)
   GPPClient *client = gpp_client_new ();
 
   g_unix_signal_add_full (G_PRIORITY_HIGH, SIGINT, (GSourceFunc) interrupted_cb, loop, NULL);
-  gpp_client_send_request (client, make_new_task(), -1, task_done, NULL);
+  g_signal_connect (client, "request-handled", G_CALLBACK (task_done_cb), NULL);
+  gpp_client_send_request (client, make_new_task(), -1);
   g_main_loop_run (loop);
   g_object_unref (client);
   return 0;
