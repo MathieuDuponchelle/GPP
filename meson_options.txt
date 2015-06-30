@@ -1,0 +1,2 @@
+option('enable-doc', type : 'boolean', value : false, description : 'enable generation of doc')
+option('disable-introspection', type : 'boolean', value : false, description : 'disable introspection of the library')

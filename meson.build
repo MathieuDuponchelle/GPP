@@ -10,4 +10,9 @@ gio_dep = dependency ('gio-2.0')
 inc = include_directories ('src')
 
 subdir ('src')
-subdir ('tools')
+subdir ('examples')
+if not get_option('disable-introspection')
+	if get_option('enable-doc')
+		subdir ('doc')
+	endif
+endif
