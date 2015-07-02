@@ -27,8 +27,6 @@ struct _GPPWorkerClass
   gboolean (*handle_request) (GPPWorker *self, const gchar *request);
 };
 
-typedef gboolean (*GPPWorkerTaskHandler)(GPPWorker *worker, const gchar *request, gpointer user_callback);
-
 GPPWorker * gpp_worker_new (void);
 gboolean gpp_worker_start (GPPWorker *self);
 gboolean gpp_worker_set_task_done (GPPWorker *self, const gchar *reply, gboolean success);
